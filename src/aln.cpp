@@ -10,11 +10,12 @@
 #include "paf.hpp"
 #include "aligner.hpp"
 #include <thread>
+#include "sam.hpp"
 
 #include <fstream>  // 包含必要的头文件
 using namespace klibpp;
 
-
+thread_local bool is_ok_fuck = 0;
 struct NamPair {
     int score;
     Nam nam1;
@@ -215,22 +216,33 @@ static inline Alignment extend_seed(
     const std::string query = nam.is_rc ? read.rc : read.seq;
     const std::string& ref = references.sequences[nam.ref_id];
 
+
     const auto projected_ref_start = std::max(0, nam.ref_start - nam.query_start);
     const auto projected_ref_end = std::min(nam.ref_end + query.size() - nam.query_end, ref.size());
 
-    AlignmentInfo info;
+    if(is_ok_fuck) {
+        fprintf(stderr, "extend_seed -- read %d : %s\n", query.size(), query.c_str());
+        fprintf(stderr, "nam : %d %d %d %d %d %d\n", nam.nam_id, nam.query_start, nam.query_end, nam.ref_start, nam.ref_end, nam.ref_id);
+        //fprintf(stderr, "extend_seed -- ref %d : %s\n", ref.size(), ref.c_str());
+        fprintf(stderr, "projected_ref_start %d\n", projected_ref_start);
+        fprintf(stderr, "projected_ref_end %d\n", projected_ref_end);
+        fprintf(stderr, "consistent_nam %d\n", consistent_nam);
+    }
+        AlignmentInfo info;
     int result_ref_start;
     bool gapped = true;
     if (projected_ref_end - projected_ref_start == query.size() && consistent_nam) {
         std::string ref_segm_ham = ref.substr(projected_ref_start, query.size());
         auto hamming_dist = hamming_distance(query, ref_segm_ham);
 
+        if(is_ok_fuck) fprintf(stderr, "hamming_dist %d\n", hamming_dist);
         if (hamming_dist >= 0 && (((float) hamming_dist / query.size()) < 0.05) ) { //Hamming distance worked fine, no need to ksw align
             info = hamming_align(query, ref_segm_ham, aligner.parameters.match, aligner.parameters.mismatch, aligner.parameters.end_bonus);
             result_ref_start = projected_ref_start + info.ref_start;
             gapped = false;
         }
     }
+    if(is_ok_fuck) fprintf(stderr, "gapped is %d\n", gapped);
     if (gapped) {
         const int diff = std::abs(nam.ref_span() - nam.query_span());
         const int ext_left = std::min(50, projected_ref_start);
@@ -244,6 +256,7 @@ static inline Alignment extend_seed(
     int softclipped = info.query_start + (query.size() - info.query_end);
     Alignment alignment;
     alignment.cigar = std::move(info.cigar);
+    //fprintf(stderr, " [last] %s\n", alignment.cigar.to_string().c_str());
     alignment.edit_distance = info.edit_distance;
     alignment.global_ed = info.edit_distance + softclipped;
     alignment.score = info.sw_score;
@@ -362,9 +375,11 @@ static inline std::vector<NamPair> get_best_scoring_nam_pairs(
     robin_hood::unordered_set<int> added_n1;
     robin_hood::unordered_set<int> added_n2;
     int best_joint_hits = 0;
+    if(is_ok_fuck) fprintf(stderr, "mu : %f, sigma : %f\n", mu, sigma);
     for (auto &nam1 : nams1) {
         for (auto &nam2 : nams2) {
             int joint_hits = nam1.n_hits + nam2.n_hits;
+            if(is_ok_fuck) fprintf(stderr, "loop1 %d %d %d\n", nam1.nam_id, nam2.nam_id, joint_hits);
             if (joint_hits < best_joint_hits / 2) {
                 break;
             }
@@ -377,12 +392,18 @@ static inline std::vector<NamPair> get_best_scoring_nam_pairs(
         }
     }
 
+    if(is_ok_fuck) {
+        fprintf(stderr, "11 size %d\n", joint_nam_scores.size());
+    }
+
     // Find high-scoring R1 NAMs that are not part of a proper pair
     Nam dummy_nam;
     dummy_nam.ref_start = -1;
     if (!nams1.empty()) {
         int best_joint_hits1 = best_joint_hits > 0 ? best_joint_hits : nams1[0].n_hits;
+        if(is_ok_fuck) fprintf(stderr, "best_joint_hits1 %d\n", best_joint_hits1);
         for (auto &nam1 : nams1) {
+            if(is_ok_fuck) fprintf(stderr, "loop2 %d %d\n", nam1.nam_id, joint_nam_scores.size());
             if (nam1.n_hits < best_joint_hits1 / 2) {
                 break;
             }
@@ -394,10 +415,15 @@ static inline std::vector<NamPair> get_best_scoring_nam_pairs(
         }
     }
 
+    if(is_ok_fuck) {
+        fprintf(stderr, "22 size %d\n", joint_nam_scores.size());
+    }
     // Find high-scoring R2 NAMs that are not part of a proper pair
     if (!nams2.empty()) {
         int best_joint_hits2 = best_joint_hits > 0 ? best_joint_hits : nams2[0].n_hits;
+        if(is_ok_fuck) fprintf(stderr, "best_joint_hits2 %d\n", best_joint_hits2);
         for (auto &nam2 : nams2) {
+            if(is_ok_fuck) fprintf(stderr, "loop3 %d %d\n", nam2.nam_id, joint_nam_scores.size());
             if (nam2.n_hits < best_joint_hits2 / 2) {
                 break;
             }
@@ -409,6 +435,9 @@ static inline std::vector<NamPair> get_best_scoring_nam_pairs(
         }
     }
 
+    if(is_ok_fuck) {
+        fprintf(stderr, "22 size %d\n", joint_nam_scores.size());
+    }
     added_n1.clear();
     added_n2.clear();
 
@@ -448,6 +477,7 @@ static inline Alignment rescue_mate(
     float sigma,
     int k
 ) {
+    //fprintf(stderr, "rescue_mate\n");
     Alignment alignment;
     int a, b;
     std::string r_tmp;
@@ -713,12 +743,37 @@ inline void align_PE(
     query_file.close();
     ref_file.close();
 
+    std::string s = record1.name;
+
+    size_t pos = s.find(".");  // 查找点的位置
+    if (pos != std::string::npos) {
+        //std::string number = s.substr(pos + 1);  // 提取点之后的部分
+		//auto num = stoi(number);
+        //fprintf(stderr, "num is %d\n", num);
+        //if(num == 3641150) {
+        //    is_ok_fuck = 1;
+        //} else {
+        //    if(num == 3641151) exit(0);
+        //    is_ok_fuck = 0;
+        //}
+    } else {
+        std::cout << "No dot found in the string." << std::endl;
+    }
 
     const auto mu = isize_est.mu;
     const auto sigma = isize_est.sigma;
     Read read1(record1.seq);
     Read read2(record2.seq);
     double secondary_dropoff = 2 * aligner.parameters.mismatch + aligner.parameters.gap_open;
+    if(is_ok_fuck) fprintf(stderr, "nams1 %d, nams2 %d\n", nams1.size(), nams2.size());
+    if(is_ok_fuck) {
+        for(auto nam : nams1) {
+            fprintf(stderr, "[info1] : id:%d, [%d, %d], [%d, %d], hits:%d, ref_id:%d, score:%lf, rc:%d\n", nam.nam_id, nam.query_start, nam.query_end, nam.ref_start, nam.ref_end, nam.n_hits, nam.ref_id, nam.score, nam.is_rc);
+        }
+        for(auto nam : nams2) {
+            fprintf(stderr, "[info2] : id:%d, [%d, %d], [%d, %d], hits:%d, ref_id:%d, score:%lf, rc:%d\n", nam.nam_id, nam.query_start, nam.query_end, nam.ref_start, nam.ref_end, nam.n_hits, nam.ref_id, nam.score, nam.is_rc);
+        }
+    }
 
     if (nams1.empty() && nams2.empty()) {
          // None of the reads have any NAMs
@@ -781,6 +836,7 @@ inline void align_PE(
 
     // Deal with the typical case that both reads map uniquely and form a proper pair
     if (top_dropoff(nams1) < dropoff && top_dropoff(nams2) < dropoff && is_proper_nam_pair(nams1[0], nams2[0], mu, sigma)) {
+        if(is_ok_fuck) fprintf(stderr, "111\n");
         Nam n_max1 = nams1[0];
         Nam n_max2 = nams2[0];
 
@@ -802,15 +858,18 @@ inline void align_PE(
         sam.add_pair(alignment1, alignment2, record1, record2, read1.rc, read2.rc, mapq1, mapq2, is_proper, is_primary, details);
 
         if ((isize_est.sample_size < 400) && (alignment1.edit_distance + alignment2.edit_distance < 3) && is_proper) {
-            isize_est.update(std::abs(alignment1.ref_start - alignment2.ref_start));
+            //isize_est.update(std::abs(alignment1.ref_start - alignment2.ref_start));
         }
         return;
     }
 
+    //fprintf(stderr, "222 ref id %d %d\n", nams1[0].ref_id, nams2[0].ref_id);
+    //fprintf(stderr, "222 nam id %d %d\n", nams1[0].nam_id, nams2[0].nam_id);
     // Do a full search for highest-scoring pair
     // Get top hit counts for all locations. The joint hit count is the sum of hits of the two mates. Then align as long as score dropoff or cnt < 20
 
     std::vector<NamPair> joint_nam_scores = get_best_scoring_nam_pairs(nams1, nams2, mu, sigma);
+    //fprintf(stderr, "222333\n");
 
     // Cache for already computed alignments. Maps NAM ids to alignments.
     robin_hood::unordered_map<int,Alignment> is_aligned1;
@@ -823,7 +882,9 @@ inline void align_PE(
         auto n1_max = nams1[0];
         bool consistent_nam1 = reverse_nam_if_needed(n1_max, read1, references, k);
         details[0].nam_inconsistent += !consistent_nam1;
+        //fprintf(stderr, "222333_1\n");
         a1_indv_max = extend_seed(aligner, n1_max, references, read1, consistent_nam1);
+        //fprintf(stderr, "222333_2\n");
         is_aligned1[n1_max.nam_id] = a1_indv_max;
         details[0].tried_alignment++;
         details[0].gapped += a1_indv_max.gapped;
@@ -831,7 +892,9 @@ inline void align_PE(
         auto n2_max = nams2[0];
         bool consistent_nam2 = reverse_nam_if_needed(n2_max, read2, references, k);
         details[1].nam_inconsistent += !consistent_nam2;
+        //fprintf(stderr, "222333_3\n");
         a2_indv_max = extend_seed(aligner, n2_max, references, read2, consistent_nam2);
+        //fprintf(stderr, "222333_4\n");
         is_aligned2[n2_max.nam_id] = a2_indv_max;
         details[1].tried_alignment++;
         details[1].gapped += a2_indv_max.gapped;
@@ -840,6 +903,13 @@ inline void align_PE(
     // Turn pairs of high-scoring NAMs into pairs of alignments
     std::vector<ScoredAlignmentPair> high_scores;
     auto max_score = joint_nam_scores[0].score;
+    if(is_ok_fuck) fprintf(stderr, "joint_nam_scores size %d\n", joint_nam_scores.size());
+    if(is_ok_fuck) {
+        for (auto &[score_, n1, n2] : joint_nam_scores) {
+
+            
+        }
+    }
     for (auto &[score_, n1, n2] : joint_nam_scores) {
         float score_dropoff = (float) score_ / max_score;
 
@@ -920,6 +990,7 @@ inline void align_PE(
     ScoredAlignmentPair aln_tuple{combined_score, a1_indv_max, a2_indv_max};
     high_scores.push_back(aln_tuple);
 
+    //fprintf(stderr, "333\n");
     std::sort(high_scores.begin(), high_scores.end(), by_score<ScoredAlignmentPair>);
     deduplicate_scored_pairs(high_scores);
     pick_random_top_pair(high_scores, random_engine);
@@ -929,9 +1000,16 @@ inline void align_PE(
     auto alignment1 = best_aln_pair.alignment1;
     auto alignment2 = best_aln_pair.alignment2;
     if (max_secondary == 0) {
+        //fprintf(stderr, "444\n");
+        std::sort(high_scores.begin(), high_scores.end(), by_score<ScoredAlignmentPair>);
         bool is_proper = is_proper_pair(alignment1, alignment2, mu, sigma);
+
+        //fprintf(stderr, " [lll] %s %s\n", alignment1.cigar.to_string().c_str(), alignment1.cigar.to_m().to_string().c_str());
+        //fprintf(stderr, " [rrr] %s %s\n", alignment2.cigar.to_string().c_str(), alignment2.cigar.to_m().to_string().c_str());
         sam.add_pair(alignment1, alignment2, record1, record2, read1.rc, read2.rc, mapq1, mapq2, is_proper, true, details);
     } else {
+        //fprintf(stderr, "555\n");
+        std::sort(high_scores.begin(), high_scores.end(), by_score<ScoredAlignmentPair>);
         auto max_out = std::min(high_scores.size(), max_secondary);
         // remove eventual duplicates - comes from, e.g., adding individual best alignments above (if identical to joint best alignment)
         float s_max = best_aln_pair.score;
@@ -1108,7 +1186,7 @@ void align_PE_read(
         Timer nam_sort_timer;
         t0 = GetTime();
         std::sort(nams.begin(), nams.end(), by_score<Nam>);
-        shuffle_top_nams(nams, random_engine);
+        //shuffle_top_nams(nams, random_engine);
         sort_time += GetTime() - t0;
         statistics.tot_sort_nams += nam_sort_timer.duration();
         nams_pair[is_revcomp] = nams;
@@ -1116,6 +1194,9 @@ void align_PE_read(
 
     Timer extend_timer;
     t0 = GetTime();
+    if(nams_pair[0].size() && nams_pair[1].size()) {
+        if(is_ok_fuck) fprintf(stderr, " [gg] %d %d\n", nams_pair[0][0].ref_id, nams_pair[1][0].ref_id);
+    }
     if (!map_param.is_sam_out) {
         Nam nam_read1;
         Nam nam_read2;
@@ -1142,7 +1223,7 @@ void align_PE_read(
 
     cnt++;
 
-    if(cnt % 1000 == 0) {
+    if(cnt % 10000 == 0) {
         std::thread::id mainthreadid = std::this_thread::get_id();
         std::ostringstream ss;
         ss << mainthreadid;

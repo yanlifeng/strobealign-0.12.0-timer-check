@@ -132,7 +132,7 @@ s_align* my_ssw_align (const s_profile* prof,
 					const uint8_t flag,
 					const uint16_t filters,
 					const int32_t filterd,
-					const int32_t maskLen, int v1, int v2, int v3, int v4, int v5);
+					const int32_t maskLen, int v1, int v2, int v3, int v4, int v5, const char* v6);
 
 
 s_align* ssw_align (const s_profile* prof,

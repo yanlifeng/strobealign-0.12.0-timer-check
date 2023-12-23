@@ -11,6 +11,7 @@
 #include "aligner.hpp"
 
 AlignmentInfo Aligner::align(const std::string &query, const std::string &ref) const {
+    //fprintf(stderr, "Aligner::align\n");
     m_align_calls++;
     AlignmentInfo aln;
     int32_t maskLen = query.length() / 2;
@@ -26,7 +27,10 @@ AlignmentInfo Aligner::align(const std::string &query, const std::string &ref) c
     StripedSmithWaterman::Alignment alignment_ssw;
 
     // query must be NULL-terminated
+    int cntt = 0;
+    //fprintf(stderr, "=== [debug align] %d\n", cntt++);
     auto flag = ssw_aligner.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment_ssw, maskLen);
+    //fprintf(stderr, "=== [debug align] %d\n", cntt++);
     if (flag != 0) {
         aln.edit_distance = 100000;
         aln.ref_start = 0;
@@ -43,6 +47,7 @@ AlignmentInfo Aligner::align(const std::string &query, const std::string &ref) c
     aln.query_start = alignment_ssw.query_begin;
     aln.query_end = alignment_ssw.query_end + 1;
 
+    //fprintf(stderr, "=== [debug align] %d\n", cntt++);
     // Try to extend to beginning of the query to get an end bonus
     auto qstart = aln.query_start;
     auto rstart = aln.ref_start;
@@ -61,6 +66,7 @@ AlignmentInfo Aligner::align(const std::string &query, const std::string &ref) c
             edits++;
         }
     }
+    //fprintf(stderr, "=== [debug align] %d\n", cntt++);
     if (qstart == 0 && score + parameters.end_bonus > aln.sw_score) {
         if (aln.query_start > 0) {
             assert((aln.cigar.m_ops[0] & 0xF) == CIGAR_SOFTCLIP);
@@ -75,6 +81,7 @@ AlignmentInfo Aligner::align(const std::string &query, const std::string &ref) c
         aln.edit_distance = edits;
     }
 
+    //fprintf(stderr, "=== [debug align] %d\n", cntt++);
     // Try to extend to end of query to get an end bonus
     auto qend = aln.query_end;
     auto rend = aln.ref_end;
@@ -93,6 +100,7 @@ AlignmentInfo Aligner::align(const std::string &query, const std::string &ref) c
         qend++;
         rend++;
     }
+    //fprintf(stderr, "=== [debug  align] %d\n", cntt++);
     if (qend == query.length() && score + parameters.end_bonus > aln.sw_score) {
         if (aln.query_end < query.length()) {
             assert((aln.cigar.m_ops[aln.cigar.m_ops.size() - 1] & 0xf) == CIGAR_SOFTCLIP);
@@ -105,6 +113,7 @@ AlignmentInfo Aligner::align(const std::string &query, const std::string &ref) c
         aln.edit_distance = edits;
     }
 
+    //fprintf(stderr, "=== [debug align] %d\n", cntt++);
     return aln;
 }
 

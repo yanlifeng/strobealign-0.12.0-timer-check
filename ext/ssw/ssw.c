@@ -83,7 +83,7 @@
 #include <sys/time.h>
 
 
-inline double GetTime() {
+double GetTime() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (double) tv.tv_sec + (double) tv.tv_usec / 1000000;
@@ -824,6 +824,34 @@ void init_destroy (s_profile* p) {
 	free(p);
 }
 
+cigar* parse_cigar_string(const char* cigar_str) {
+    int count = 0;
+    // 首先计算CIGAR操作的数量
+    for (int i = 0; cigar_str[i] != '\0'; ++i) {
+        if (isalpha(cigar_str[i])) {
+            count++;
+        }
+    }
+
+    // 分配足够的空间来存储CIGAR操作
+    cigar* result = malloc(sizeof(cigar));
+    result->seq = malloc(count * sizeof(uint32_t));
+    result->length = count;
+
+    int index = 0;
+    int length = 0;
+    for (int i = 0; cigar_str[i] != '\0'; ++i) {
+        if (isdigit(cigar_str[i])) {
+            length = length * 10 + (cigar_str[i] - '0');
+        } else if (isalpha(cigar_str[i])) {
+            result->seq[index++] = to_cigar_int(length, cigar_str[i]);
+            length = 0;
+        }
+    }
+
+    return result;
+}
+
 s_align* my_ssw_align (const s_profile* prof,
 					const int8_t* ref,
 				  	int32_t refLen,
@@ -832,7 +860,7 @@ s_align* my_ssw_align (const s_profile* prof,
 					const uint8_t flag,	//  (from high to low) bit 5: return the best alignment beginning position; 6: if (ref_end1 - ref_begin1 <= filterd) && (read_end1 - read_begin1 <= filterd), return cigar; 7: if max score >= filters, return cigar; 8: always return cigar; if 6 & 7 are both setted, only return cigar when both filter fulfilled
 					const uint16_t filters,
 					const int32_t filterd,
-					const int32_t maskLen, int v1, int v2, int v3, int v4, int v5) {
+					const int32_t maskLen, int v1, int v2, int v3, int v4, int v5, const char* v6) {
 
     static __thread double byte_time1 = 0;
     static __thread double byte_time2 = 0;
@@ -902,19 +930,19 @@ s_align* my_ssw_align (const s_profile* prof,
     r->score1 = v1;
     r->ref_end1 = v5;
     r->read_end1 = v4;
-	if (flag == 0 || (flag == 2 && r->score1 < filters)) goto end;
+	//if (flag == 0 || (flag == 2 && r->score1 < filters)) goto end;
 
-	// Find the beginning position of the best alignment.
+	//// Find the beginning position of the best alignment.
 	//read_reverse = seq_reverse(prof->read, r->read_end1);
 	//if (word == 0) {
 	//	vP = qP_byte(read_reverse, prof->mat, r->read_end1 + 1, prof->n, prof->bias);
     //    t0 = GetTime();
-	//	//bests_reverse = sw_sse2_byte(ref, 1, r->ref_end1 + 1, r->read_end1 + 1, weight_gapO, weight_gapE, vP, r->score1, prof->bias, maskLen);
+	//	bests_reverse = sw_sse2_byte(ref, 1, r->ref_end1 + 1, r->read_end1 + 1, weight_gapO, weight_gapE, vP, r->score1, prof->bias, maskLen);
     //    byte_time2 += GetTime() - t0;
 	//} else {
 	//	vP = qP_word(read_reverse, prof->mat, r->read_end1 + 1, prof->n);
     //    t0 = GetTime();
-	//	//bests_reverse = sw_sse2_word(ref, 1, r->ref_end1 + 1, r->read_end1 + 1, weight_gapO, weight_gapE, vP, r->score1, maskLen);
+	//	bests_reverse = sw_sse2_word(ref, 1, r->ref_end1 + 1, r->read_end1 + 1, weight_gapO, weight_gapE, vP, r->score1, maskLen);
     //    word_time3 += GetTime() - t0;
 	//}
 	//free(vP);
@@ -939,12 +967,19 @@ s_align* my_ssw_align (const s_profile* prof,
 	readLen = r->read_end1 - r->read_begin1 + 1;
 	band_width = abs(refLen - readLen) + 1;
     t0 = GetTime();
-	path = banded_sw(ref + r->ref_begin1, prof->read + r->read_begin1, refLen, readLen, r->score1, weight_gapO, weight_gapE, band_width, prof->mat, prof->n);
+    char *vv6 = v6 + strlen("CIGAR=");
+    int vv6_len = strlen(vv6);
+    //fprintf(stderr, "s1 : %s\n", vv6);
+    if(vv6_len == 0) {
+        path = banded_sw(ref + r->ref_begin1, prof->read + r->read_begin1, refLen, readLen, r->score1, weight_gapO, weight_gapE, band_width, prof->mat, prof->n);
+    } else {
+		path = parse_cigar_string(vv6);
+    }
     band_time += GetTime() - t0;
 
     cnt++;
 
-    if(cnt % 1000 == 0) {
+    if(cnt % 10000 == 0) {
         pthread_t mainThreadId = pthread_self();
         unsigned long mainThreadIdValue = (unsigned long) mainThreadId;
         fprintf(stderr, "---- [%lld] b1:%lf b2:%lf, w1:%lf, w2:%lf, w3:%lf, band:%lf\n", mainThreadIdValue, byte_time1, byte_time2, word_time1, word_time2, word_time3, band_time);
@@ -1082,7 +1117,7 @@ s_align* ssw_align (const s_profile* prof,
 
     cnt++;
 
-    if(cnt % 1000 == 0) {
+    if(cnt % 10000 == 0) {
         pthread_t mainThreadId = pthread_self();
         unsigned long mainThreadIdValue = (unsigned long) mainThreadId;
         fprintf(stderr, "---- [%lld] b1:%lf b2:%lf, w1:%lf, w2:%lf, w3:%lf, band:%lf\n", mainThreadIdValue, byte_time1, byte_time2, word_time1, word_time2, word_time3, band_time);

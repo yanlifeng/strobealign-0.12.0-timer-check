@@ -174,6 +174,7 @@ std::pair<float, std::vector<Nam>> find_nams(
             add_to_hits_per_ref(hits_per_ref[q.is_reverse], q.start, q.end, index, position);
         }
     }
+    //fprintf(stderr, "total_hits %d, nr_good_hits %d\n", total_hits, nr_good_hits);
     float nonrepetitive_fraction = total_hits > 0 ? ((float) nr_good_hits) / ((float) total_hits) : 1.0;
     auto nams = merge_hits_into_nams_forward_and_reverse(hits_per_ref, index.k(), false);
     return make_pair(nonrepetitive_fraction, nams);

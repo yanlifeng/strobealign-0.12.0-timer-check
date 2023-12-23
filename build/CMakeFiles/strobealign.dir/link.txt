@@ -1,0 +1,1 @@
+/usr/bin/c++  -msse4.2 -D_LIBCPP_DISABLE_AVAILABILITY -O3 -DNDEBUG   CMakeFiles/strobealign.dir/src/main.cpp.o  -o strobealign  libsalib.a -lpthread /usr/lib/x86_64-linux-gnu/libz.so 
